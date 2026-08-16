@@ -1,8 +1,9 @@
 #!/bin/bash
 
+echo "########################################"
 echo "START.SH EXECUTED"
 echo "PORT=$PORT"
 echo "USER=$(whoami)"
-echo "===================="
+echo "########################################"
 
-sleep 60
+sleep 300
