@@ -21,17 +21,28 @@ if [ ! -f "$CONFIG_PATH" ]; then
         --server-name="${SERVER_NAME}" \
         --config-path="${CONFIG_PATH}" \
         --report-stats=no
-
-    echo "Enabling registration..."
-
-    sed -i \
-        's/enable_registration: false/enable_registration: true/' \
-        "${CONFIG_PATH}"
 fi
 
-echo "Configuring Synapse listener..."
+echo "Configuring registration..."
 
-python3 - "${CONFIG_PATH}" "${PORT_TO_USE}" <<'PY'
+if grep -q '^enable_registration:' "$CONFIG_PATH"; then
+    sed -i 's/^enable_registration:.*/enable_registration: true/' "$CONFIG_PATH"
+else
+    echo 'enable_registration: true' >> "$CONFIG_PATH"
+fi
+
+if grep -q '^enable_registration_without_verification:' "$CONFIG_PATH"; then
+    sed -i 's/^enable_registration_without_verification:.*/enable_registration_without_verification: true/' "$CONFIG_PATH"
+else
+    echo 'enable_registration_without_verification: true' >> "$CONFIG_PATH"
+fi
+
+echo "Registration settings:"
+grep '^enable_registration' "$CONFIG_PATH" || true
+
+echo "Configuring port and listener..."
+
+python3 - "$CONFIG_PATH" "$PORT_TO_USE" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -41,7 +52,6 @@ port = sys.argv[2]
 
 text = config_path.read_text()
 
-# Replace the generated HTTP listener block.
 pattern = (
     r"(?ms)^  - bind_addresses:\n"
     r"(?:    - .*\n)+"
@@ -54,23 +64,21 @@ replacement = (
     f"    port: {port}"
 )
 
-new_text, count = re.subn(pattern, replacement, text, count=1)
+text, count = re.subn(pattern, replacement, text, count=1)
 
 if count == 0:
-    print("ERROR: Could not find Synapse listener block")
-    sys.exit(1)
-
-config_path.write_text(new_text)
-
-print("Listener successfully configured.")
+    print("Listener already configured or pattern not found")
+else:
+    config_path.write_text(text)
+    print("Listener configured successfully")
 PY
 
 echo "======================================"
-echo "FINAL SYNAPSE LISTENER:"
-grep -A15 "listeners:" "${CONFIG_PATH}"
+echo "Final listener:"
+grep -A15 "listeners:" "$CONFIG_PATH" || true
 echo "======================================"
 
 echo "Starting Synapse..."
 
 exec python3 -m synapse.app.homeserver \
-    --config-path="${CONFIG_PATH}"
+    --config-path="$CONFIG_PATH"
