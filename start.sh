@@ -13,6 +13,7 @@ echo "======================================"
 
 mkdir -p /data
 
+# Generate config only on first startup
 if [ ! -f "$CONFIG_PATH" ]; then
     echo "Generating Synapse configuration..."
 
@@ -23,35 +24,62 @@ if [ ! -f "$CONFIG_PATH" ]; then
         --report-stats=no
 fi
 
+# --------------------------------------------------
+# FORCE REGISTRATION SETTINGS
+# --------------------------------------------------
+
+echo "======================================"
 echo "Configuring registration..."
+echo "======================================"
 
-if grep -q '^enable_registration:' "$CONFIG_PATH"; then
-    sed -i 's/^enable_registration:.*/enable_registration: true/' "$CONFIG_PATH"
-else
-    echo 'enable_registration: true' >> "$CONFIG_PATH"
-fi
+python3 - "$CONFIG_PATH" <<'PY'
+from pathlib import Path
+import re
+import sys
 
-if grep -q '^enable_registration_without_verification:' "$CONFIG_PATH"; then
-    sed -i 's/^enable_registration_without_verification:.*/enable_registration_without_verification: true/' "$CONFIG_PATH"
-else
-    echo 'enable_registration_without_verification: true' >> "$CONFIG_PATH"
-fi
+path = Path(sys.argv[1])
+text = path.read_text()
 
-echo "Registration settings:"
-grep '^enable_registration' "$CONFIG_PATH" || true
+settings = {
+    "enable_registration": "true",
+    "enable_registration_without_verification": "true",
+}
 
-echo "Configuring port and listener..."
+for key, value in settings.items():
+    pattern = rf"(?m)^{re.escape(key)}:.*$"
+    replacement = f"{key}: {value}"
+
+    if re.search(pattern, text):
+        text = re.sub(pattern, replacement, text)
+    else:
+        text += f"\n{replacement}\n"
+
+path.write_text(text)
+PY
+
+echo "CURRENT REGISTRATION CONFIG:"
+grep -E '^(enable_registration|enable_registration_without_verification):' \
+    "$CONFIG_PATH" || true
+
+# --------------------------------------------------
+# CONFIGURE PORT + LISTENER
+# --------------------------------------------------
+
+echo "======================================"
+echo "Configuring listener..."
+echo "======================================"
 
 python3 - "$CONFIG_PATH" "$PORT_TO_USE" <<'PY'
 import re
 import sys
 from pathlib import Path
 
-config_path = Path(sys.argv[1])
+path = Path(sys.argv[1])
 port = sys.argv[2]
 
-text = config_path.read_text()
+text = path.read_text()
 
+# Replace the generated listener bind addresses and port.
 pattern = (
     r"(?ms)^  - bind_addresses:\n"
     r"(?:    - .*\n)+"
@@ -67,18 +95,28 @@ replacement = (
 text, count = re.subn(pattern, replacement, text, count=1)
 
 if count == 0:
-    print("Listener already configured or pattern not found")
+    print("WARNING: listener pattern not found")
 else:
-    config_path.write_text(text)
+    path.write_text(text)
     print("Listener configured successfully")
 PY
 
 echo "======================================"
-echo "Final listener:"
-grep -A15 "listeners:" "$CONFIG_PATH" || true
+echo "FINAL REGISTRATION SETTINGS"
 echo "======================================"
 
+grep -E '^(enable_registration|enable_registration_without_verification):' \
+    "$CONFIG_PATH" || true
+
+echo "======================================"
+echo "FINAL LISTENER"
+echo "======================================"
+
+grep -A15 "listeners:" "$CONFIG_PATH" || true
+
+echo "======================================"
 echo "Starting Synapse..."
+echo "======================================"
 
 exec python3 -m synapse.app.homeserver \
     --config-path="$CONFIG_PATH"
