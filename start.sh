@@ -1,19 +1,41 @@
 #!/bin/bash
-CONFIG_PATH="/data/homeserver.yaml"
+set -e
 
-# Generate config if missing
+CONFIG_PATH="/data/homeserver.yaml"
+PORT_TO_USE="${PORT:-10000}"
+
+# Generate config if it doesn't exist
 if [ ! -f "$CONFIG_PATH" ]; then
     python3 -m synapse.app.homeserver \
         --generate-config \
-        --server-name="$RENDER_EXTERNAL_HOSTNAME" \
-        --config-path="$CONFIG_PATH"
-    
+        --server-name="${RENDER_EXTERNAL_HOSTNAME}" \
+        --config-path="$CONFIG_PATH" \
+        --report-stats=no
+
     sed -i 's/enable_registration: false/enable_registration: true/g' "$CONFIG_PATH"
 fi
 
-# Start a tiny background web server on Render's $PORT to pass health checks immediately
-PORT_TO_USE=${PORT:-10000}
-python3 -m http.server $PORT_TO_USE --directory /tmp &
+# Make Synapse listen on Render's port and all interfaces
+python3 - "$CONFIG_PATH" "$PORT_TO_USE" <<'PY'
+import sys
+import yaml
 
-# Start Synapse in the background or foreground
-exec python3 -m synapse.app.homeserver --config-path "$CONFIG_PATH"
+config_path = sys.argv[1]
+port = int(sys.argv[2])
+
+with open(config_path) as f:
+    config = yaml.safe_load(f)
+
+for listener in config["listeners"]:
+    if listener.get("type") == "http":
+        listener["port"] = port
+        listener["bind_addresses"] = ["0.0.0.0"]
+
+with open(config_path, "w") as f:
+    yaml.safe_dump(config, f, sort_keys=False)
+PY
+
+echo "Starting Synapse on 0.0.0.0:${PORT_TO_USE}"
+
+exec python3 -m synapse.app.homeserver \
+    --config-path="$CONFIG_PATH"
