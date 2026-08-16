@@ -1,3 +1,4 @@
+
 FROM matrixdotorg/synapse:latest
 
 USER root
