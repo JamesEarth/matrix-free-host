@@ -32,6 +32,7 @@ fi
 echo "Configuring Synapse listener..."
 
 python3 - "${CONFIG_PATH}" "${PORT_TO_USE}" <<'PY'
+import re
 import sys
 from pathlib import Path
 
@@ -40,32 +41,33 @@ port = sys.argv[2]
 
 text = config_path.read_text()
 
-# Change default Synapse port 8008 -> Render's PORT.
-text = text.replace(
-    "port: 8008",
-    f"port: {port}",
-    1
+# Replace the generated HTTP listener block.
+pattern = (
+    r"(?ms)^  - bind_addresses:\n"
+    r"(?:    - .*\n)+"
+    r"    port: \d+"
 )
 
-# Listen on all interfaces so Render can reach Synapse.
-text = text.replace(
-    "bind_addresses:\n      - ::1\n      - 127.0.0.1",
-    "bind_addresses:\n      - 0.0.0.0",
-    1
+replacement = (
+    "  - bind_addresses:\n"
+    "    - 0.0.0.0\n"
+    f"    port: {port}"
 )
 
-text = text.replace(
-    "bind_addresses:\n      - 127.0.0.1",
-    "bind_addresses:\n      - 0.0.0.0",
-    1
-)
+new_text, count = re.subn(pattern, replacement, text, count=1)
 
-config_path.write_text(text)
+if count == 0:
+    print("ERROR: Could not find Synapse listener block")
+    sys.exit(1)
+
+config_path.write_text(new_text)
+
+print("Listener successfully configured.")
 PY
 
 echo "======================================"
-echo "Synapse listener configuration:"
-grep -A15 "listeners:" "${CONFIG_PATH}" || true
+echo "FINAL SYNAPSE LISTENER:"
+grep -A15 "listeners:" "${CONFIG_PATH}"
 echo "======================================"
 
 echo "Starting Synapse..."
