@@ -12,44 +12,42 @@ echo "PORT=${PORT_TO_USE}"
 echo "======================================"
 
 mkdir -p /data
-chown -R synapse:synapse /data
 
 if [ ! -f "$CONFIG_PATH" ]; then
     echo "Generating Synapse configuration..."
 
-    su -s /bin/bash synapse -c \
-        "python3 -m synapse.app.homeserver \
+    python3 -m synapse.app.homeserver \
         --generate-config \
-        --server-name='${SERVER_NAME}' \
-        --config-path='${CONFIG_PATH}' \
-        --report-stats=no"
+        --server-name="${SERVER_NAME}" \
+        --config-path="${CONFIG_PATH}" \
+        --report-stats=no
 
     echo "Enabling registration..."
 
     sed -i \
         's/enable_registration: false/enable_registration: true/' \
-        "$CONFIG_PATH"
+        "${CONFIG_PATH}"
 fi
 
 echo "Configuring Synapse listener..."
 
-python3 - "$CONFIG_PATH" "$PORT_TO_USE" <<'PY'
+python3 - "${CONFIG_PATH}" "${PORT_TO_USE}" <<'PY'
 import sys
 from pathlib import Path
 
-config = Path(sys.argv[1])
+config_path = Path(sys.argv[1])
 port = sys.argv[2]
 
-text = config.read_text()
+text = config_path.read_text()
 
-# Change Synapse's default HTTP port to Render's port.
+# Change default Synapse port 8008 -> Render's PORT.
 text = text.replace(
     "port: 8008",
     f"port: {port}",
     1
 )
 
-# Listen externally instead of localhost.
+# Listen on all interfaces so Render can reach Synapse.
 text = text.replace(
     "bind_addresses:\n      - ::1\n      - 127.0.0.1",
     "bind_addresses:\n      - 0.0.0.0",
@@ -62,15 +60,15 @@ text = text.replace(
     1
 )
 
-config.write_text(text)
+config_path.write_text(text)
 PY
 
 echo "======================================"
-echo "Synapse listener:"
-grep -A15 "listeners:" "$CONFIG_PATH" || true
+echo "Synapse listener configuration:"
+grep -A15 "listeners:" "${CONFIG_PATH}" || true
 echo "======================================"
 
 echo "Starting Synapse..."
 
-exec su -s /bin/bash synapse -c \
-    "python3 -m synapse.app.homeserver --config-path='${CONFIG_PATH}'"
+exec python3 -m synapse.app.homeserver \
+    --config-path="${CONFIG_PATH}"
